@@ -143,6 +143,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         name: str,
         description_html: str,
         project_id: str | None = None,
+        parent_id: str | None = None,
         access: int | None = None,
         color: str | None = None,
         is_locked: bool | None = None,
@@ -156,12 +157,14 @@ def register_page_tools(mcp: FastMCP) -> None:
         Create a page.
 
         Creates a project page if project_id is given, otherwise a
-        workspace-level page.
+        workspace-level page. Pass parent_id to create a nested (sub) page
+        under an existing page in the same workspace/project.
 
         Args:
             name: Page name
             description_html: Page content in HTML format
             project_id: UUID of the project. Omit to create a workspace page.
+            parent_id: UUID of the parent page for nesting. Omit for a top-level page.
             access: Access level for the page (integer)
             color: Page color
             is_locked: Whether the page is locked
@@ -188,6 +191,16 @@ def register_page_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             external_source=external_source,
         )
+
+        if parent_id is not None:
+            # The SDK CreatePage model has no parent field; send the raw
+            # payload through the resource's HTTP layer instead
+            payload = {**data.model_dump(exclude_none=True), "parent": parent_id}
+            if project_id is not None:
+                raw = client.pages._post(f"{workspace_slug}/projects/{project_id}/pages", payload)
+            else:
+                raw = client.pages._post(f"{workspace_slug}/pages", payload)
+            return Page.model_validate(raw)
 
         if project_id is not None:
             return client.pages.create_project_page(
