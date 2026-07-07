@@ -11,6 +11,7 @@ from plane.models.modules import (
     Module,
     PaginatedArchivedModuleResponse,
     PaginatedModuleLiteResponse,
+    PaginatedModuleResponse,
     PaginatedModuleWorkItemResponse,
     UpdateModule,
 )
@@ -18,6 +19,7 @@ from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.compat import with_ce_fallback
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -33,7 +35,7 @@ def register_module_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
-    ) -> PaginatedModuleLiteResponse | PaginatedArchivedModuleResponse:
+    ) -> PaginatedModuleLiteResponse | PaginatedArchivedModuleResponse | PaginatedModuleResponse:
         """
         List modules in a project.
 
@@ -57,8 +59,15 @@ def register_module_tools(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=params.model_dump(exclude_none=True),
             )
-        return client.modules.list_lite(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
+        return with_ce_fallback(
+            lambda: client.modules.list_lite(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            ),
+            lambda: client.modules.list(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params.model_dump(exclude_none=True),
+            ),
         )
 
     @mcp.tool()

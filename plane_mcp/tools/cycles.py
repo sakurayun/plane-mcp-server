@@ -11,6 +11,7 @@ from plane.models.cycles import (
     Cycle,
     PaginatedArchivedCycleResponse,
     PaginatedCycleLiteResponse,
+    PaginatedCycleResponse,
     PaginatedCycleWorkItemResponse,
     TransferCycleWorkItemsRequest,
     UpdateCycle,
@@ -20,6 +21,7 @@ from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryPar
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.compat import with_ce_fallback
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -36,7 +38,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
-    ) -> PaginatedCycleLiteResponse | PaginatedArchivedCycleResponse:
+    ) -> PaginatedCycleLiteResponse | PaginatedArchivedCycleResponse | PaginatedCycleResponse | list[Cycle]:
         """
         List cycles in a project. Active (non-archived) cycles by default.
 
@@ -64,7 +66,14 @@ def register_cycle_tools(mcp: FastMCP) -> None:
                 params=params.model_dump(exclude_none=True),
             )
         params = CycleLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, status=status)
-        return client.cycles.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
+        return with_ce_fallback(
+            lambda: client.cycles.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params),
+            lambda: client.cycles.list(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params.model_dump(exclude_none=True),
+            ),
+        )
 
     @mcp.tool()
     def create_cycle(

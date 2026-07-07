@@ -16,15 +16,17 @@ from plane.models.projects import (
     CreateProject,
     PaginatedProjectLiteResponse,
     PaginatedProjectMemberResponse,
+    PaginatedProjectResponse,
     Project,
     ProjectFeature,
+    ProjectMember,
     ProjectWorklogSummary,
     UpdateProject,
 )
-from plane.models.query_params import ProjectLiteListQueryParams
-from plane.models.query_params import MemberListQueryParams
+from plane.models.query_params import MemberListQueryParams, PaginatedQueryParams, ProjectLiteListQueryParams
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.compat import with_ce_fallback
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -35,7 +37,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
-    ) -> PaginatedProjectLiteResponse:
+    ) -> PaginatedProjectLiteResponse | PaginatedProjectResponse:
         """
         List projects in a workspace (lite, paginated).
 
@@ -57,7 +59,13 @@ def register_project_tools(mcp: FastMCP) -> None:
             cursor=cursor, per_page=per_page, order_by=order_by, include_archived=False
         )
 
-        return client.projects.list_lite(workspace_slug=workspace_slug, params=params)
+        return with_ce_fallback(
+            lambda: client.projects.list_lite(workspace_slug=workspace_slug, params=params),
+            lambda: client.projects.list(
+                workspace_slug=workspace_slug,
+                params=PaginatedQueryParams(cursor=cursor, per_page=per_page, order_by=order_by),
+            ),
+        )
 
     @mcp.tool()
     def create_project(
@@ -311,7 +319,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = 100,
         order_by: str | None = None,
-    ) -> PaginatedProjectMemberResponse:
+    ) -> PaginatedProjectMemberResponse | list[ProjectMember]:
         """
         List members of a project (filterable, paginated).
 
@@ -341,8 +349,24 @@ def register_project_tools(mcp: FastMCP) -> None:
             per_page=per_page,
             order_by=order_by,
         )
-        return client.projects.get_members_lite(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
+        member_filters = {
+            k: v
+            for k, v in {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "display_name": display_name,
+                "role_slug": role_slug,
+            }.items()
+            if v is not None
+        }
+        return with_ce_fallback(
+            lambda: client.projects.get_members_lite(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            ),
+            lambda: client.projects.get_members(
+                workspace_slug=workspace_slug, project_id=project_id, params=member_filters
+            ),
         )
 
     @mcp.tool()

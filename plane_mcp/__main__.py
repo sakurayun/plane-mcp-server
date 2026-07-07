@@ -145,21 +145,25 @@ def main() -> None:
     if server_mode == ServerMode.HTTP:
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
-        oauth_mcp = get_oauth_mcp(prefix + "/http")
-        oauth_app = oauth_mcp.http_app(stateless_http=True)
         header_app = get_header_mcp().http_app(stateless_http=True)
 
-        sse_mcp = get_oauth_mcp(prefix)
-        sse_app = sse_mcp.http_app(transport="sse")
+        # OAuth requires a Plane instance with OAuth application support
+        # (Plane Cloud / EE). Self-hosted CE has no /auth/o/ endpoints, so when
+        # no OAuth client is configured, serve only the header-auth endpoint.
+        if os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID"):
+            oauth_mcp = get_oauth_mcp(prefix + "/http")
+            oauth_app = oauth_mcp.http_app(stateless_http=True)
 
-        # mcp_path is appended to the auth provider's base_url to form the
-        # advertised resource URL. base_url already carries the prefix, so these
-        # stay at /mcp and /sse to avoid double-prefixing.
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
+            sse_mcp = get_oauth_mcp(prefix)
+            sse_app = sse_mcp.http_app(transport="sse")
 
-        app = Starlette(
-            routes=[
+            # mcp_path is appended to the auth provider's base_url to form the
+            # advertised resource URL. base_url already carries the prefix, so these
+            # stay at /mcp and /sse to avoid double-prefixing.
+            oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
+            sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
+
+            routes = [
                 # Well-known routes for OAuth and Header HTTP
                 *oauth_well_known,
                 *sse_well_known,
@@ -167,9 +171,18 @@ def main() -> None:
                 Mount(prefix + "/http/api-key", app=header_app),
                 Mount(prefix + "/http", app=oauth_app),
                 Mount(prefix or "/", app=sse_app),
-            ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
-        )
+            ]
+            lifespan = lambda app: combined_lifespan(oauth_app, header_app, sse_app)  # noqa: E731
+        else:
+            logger.warning(
+                "PLANE_OAUTH_PROVIDER_CLIENT_ID is not set - OAuth and SSE endpoints disabled; "
+                "serving header-auth endpoint only at %s/http/api-key/mcp",
+                prefix,
+            )
+            routes = [Mount(prefix + "/http/api-key", app=header_app)]
+            lifespan = lambda app: header_app.lifespan(header_app)  # noqa: E731
+
+        app = Starlette(routes=routes, lifespan=lifespan)
 
         app.add_middleware(
             CORSMiddleware,
